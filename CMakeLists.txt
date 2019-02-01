@@ -18,11 +18,13 @@ set( SOURCE
    src/main.cpp
    src/marker.cpp
    src/markerlist.cpp
+   src/neural.cpp
 )
 set( HEADERS
    ${HEADERS}
    src/markerlist.h
    src/marker.h
+   src/neural.h
 )
 
 LINK_DIRECTORIES(${TENSORFLOW})

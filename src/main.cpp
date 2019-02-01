@@ -7,6 +7,9 @@
 #include <string>
 #include "src/markerlist.h"
 #include <c_api.h>
+#include "src/neural.h"
+#include <stdio.h>
+#include <direct.h>
 #define M_PI 3.14159265358924
 
 	static mrvision::MarkerList MARKERLIST;
@@ -429,7 +432,33 @@
 
 	int main(int argc, char** argv)
 	{
+		char ___buff[FILENAME_MAX];
+		_getcwd(___buff, FILENAME_MAX);
+		std::string cwd(___buff);
+		std::cout << "Working directory: " << cwd << std::endl;
+
 		std::cout << "Hello from TensorFlow C library version " << TF_Version() << std::endl;
+		
+		//https://gist.github.com/asimshankar/7c9f8a9b04323e93bb217109da8c7ad2
+
+		model_t model;
+		if (!ModelCreate(&model, "./frozen_model.pb")) {
+			std::cout << "Model loading failed" << std::endl;
+		}
+		else {
+			if (!ModelCheckpoint(&model, "./checkpoint/checkpoint", RESTORE)) {
+				std::cout << "Checkpoint loading failed" << std::endl;
+			}
+			else {
+				if (!ModelInit(&model)) {
+					std::cout << "Model initialization failed" << std::endl;
+				}
+				else {
+					std::cout << "Model loaded correctly" << std::endl;
+				}
+			}
+		}
+
 		/*
 		int vCounter = 0;
 		do {
