@@ -21,6 +21,7 @@
 		float mMarkerDirection;
 		cv::Point mMarkerPosition;
 		std::vector<bool> mMarker;
+		float mMarkerConfidence;
 		int mMarkerId;
 		DetectedMarker(cv::Mat aMarkerImage, float aMarkerDirection, cv::Point aMarkerPosition);
 	};
@@ -30,7 +31,8 @@
 		mMarkerDirection(aMarkerDirection),
 		mMarkerPosition(aMarkerPosition),
 		mMarker(),
-		mMarkerId(-1)
+		mMarkerId(-1),
+		mMarkerConfidence(0.0)
 	{}
 
 	bool identifyMarker(DetectedMarker& aNotYetFoundMarker);
@@ -228,6 +230,10 @@
 
 		cv::Mat vRegionOfInterest, vRegionOfInterestImage, vMarkerImage, vRotationMatrix;
 
+		cv::Mat outputImage;
+		cv::cvtColor(aImage, outputImage, cv::COLOR_GRAY2BGR);
+
+
 		std::vector<cv::Point> vPotentialMarker;
 		cv::RotatedRect vRotationBox;
 		bool markerFound = false;
@@ -254,14 +260,11 @@
 
 				DetectedMarker vUnDetectedMarker(vMarkerImage, vRotationBox.angle, vRotationBox.center);
 
-				cv::Mat outputImage(aImage);
-
 				cv::Point2f vertices[4];
 				vRotationBox.points(vertices);
 				for (int i = 0; i < 4; i++)
-					line(outputImage, vertices[i], vertices[(i + 1) % 4], cv::Scalar(255, 255, 255), 1);
+					cv::line(outputImage, vertices[i], vertices[(i + 1) % 4], cv::Scalar(0, 255, 0), 1);
 
-				cv::imshow("Found", outputImage);
 				cv::imshow("Marker", vMarkerImage);
 
 				if (identifyMarker(vUnDetectedMarker)) {
@@ -280,186 +283,149 @@
 			}
 		}
 
-		auto markerInRange = [min = 0.0, max = 15.0](DetectedMarker m1, DetectedMarker m2){double val = std::pow(m1.mMarkerPosition.x - m2.mMarkerPosition.x, 2) + std::pow(m1.mMarkerPosition.y - m2.mMarkerPosition.y, 2);   return (val >= min * min && val <= max * max); };
 
-		std::vector<std::vector<DetectedMarker>> markerGroups;
-		for (auto marker : vFoundMarkers) {
-			bool markerAssigned = false;
-			for (auto group : markerGroups) {
-				for (auto marker2 : group) {
-					if (markerInRange(marker, marker2)) {
-						group.push_back(marker);
-						markerAssigned = true;
-						break;
+		cv::imshow("Found", outputImage);
+
+		auto isNear = [max_distance = 10 * 10](DetectedMarker m1, DetectedMarker m2) {float distance_sq = std::pow(m1.mMarkerPosition.x - m2.mMarkerPosition.x, 2) + std::pow(m1.mMarkerPosition.y - m2.mMarkerPosition.y, 2); return distance_sq <= max_distance;};
+
+		std::vector<DetectedMarker> ActuallyRealFoundMarkers;
+
+		if (vFoundMarkers.size()) {
+			while (vFoundMarkers.size()) {
+				std::vector<DetectedMarker> cluster;
+				cluster.push_back(vFoundMarkers.back());
+				vFoundMarkers.pop_back();
+				
+				for (int i = 0; i < vFoundMarkers.size(); i++) {
+					if (isNear(vFoundMarkers[i],cluster.front())) {
+						cluster.push_back(vFoundMarkers[i]);
+						vFoundMarkers.erase(vFoundMarkers.begin() + i, vFoundMarkers.begin() + i + 1);
+						i--;
 					}
 				}
-				if (markerAssigned) {
-					break;
+
+				DetectedMarker best_marker = cluster.front();
+				for (auto m : cluster) {
+					if (m.mMarkerConfidence > best_marker.mMarkerConfidence) {
+						best_marker = m;
+					}
 				}
-			}
-			if (!markerAssigned) {
-				markerGroups.push_back(std::vector<DetectedMarker>{marker});
+				ActuallyRealFoundMarkers.push_back(best_marker);
 			}
 		}
 
-		std::vector<DetectedMarker> vRealFoundMarkers;
+		cv::Mat out4;
+		cv::cvtColor(aImage, out4, cv::COLOR_GRAY2BGR);
 
-		for (auto group : markerGroups) {
-			std::vector<int> foundMarkerIds(64, 0);
-			for (auto marker : group) {
-				foundMarkerIds[marker.mMarkerId]++;
-			}
+		cv::line(out4, cv::Point(30, 30), cv::Point(30 + std::cos(0 / 180.0 * 3.141) * 20, 30 + std::sin(0 / 180.0 * 3.141) * 20), cv::Scalar(0, 0, 255), 3);
+		cv::line(out4, cv::Point(30, 30), cv::Point(30 + std::cos(90 / 180.0 * 3.141) * 20, 30 + std::sin(90 / 180.0 * 3.141) * 20), cv::Scalar(0, 255, 0), 3);
 
-			int max = 0, maxId = 0;
-			for (int i = 0; i < 64; i++) {
-				if (foundMarkerIds[i] > max) {
-					max = foundMarkerIds[i];
-					maxId = i;
-				}
-			}
 
-			auto result = std::find_if(group.begin(), group.end(), [&](DetectedMarker el) {return el.mMarkerId == maxId; });
-			vRealFoundMarkers.push_back(*result);
-			realFoundMarkerIds[maxId] ++;
+		for (auto m : ActuallyRealFoundMarkers) {
+			std::cout << m.mMarkerId << " " << m.mMarkerDirection << " " << m.mMarkerConfidence << std::endl;
+			cv::circle(out4, m.mMarkerPosition, 2, cv::Scalar(0, 0, 255),3);
+			cv::line(out4, m.mMarkerPosition, cv::Point(m.mMarkerPosition.x + std::cos((m.mMarkerDirection) / 180.0 * 3.141) * 20, m.mMarkerPosition.y + std::sin((m.mMarkerDirection)/ 180.0 * 3.141) * 20), cv::Scalar(0, 0, 255),3);
 		}
 
-
-		if (!markerFound) {
-			std::cout << "No marker found " << std::endl;
-			notIdentified++;
-			//cv::waitKey(0);
-		}
-
-		if (mFoundCombinations.size() == 0) {
-			//cv::waitKey(0);
-			std::cout << "No combinations" << std::endl;
-			notFound++;
-			//emit markersDetected(vFoundMarkers);
-		}
+		cv::imshow("Markers", out4);
 
 		mIteration++;
 
 		isRunning = false;
-
-		std::cout << "Not found: " << notFound << ", not identified: " << notIdentified << ", wrong: " << wrong << std::endl;
 	}
 
+
+	model_t modelvar;
+	bool model_loaded = false;
+	model_t getModel() {
+		if (!model_loaded) {
+			//https://gist.github.com/asimshankar/7c9f8a9b04323e93bb217109da8c7ad2
+			if (!ModelCreate(&modelvar, "./frozen_model.pb")) {
+				std::cout << "Model loading failed" << std::endl;
+			}
+			else {
+				model_loaded = true;
+			}
+		}
+		return modelvar;
+	}
 
 	int vtr2;
 
 	bool identifyMarker(DetectedMarker& aNotYetFoundMarker) {
+		try{
+			const auto imsize = 100.0;
+			const auto marker_threshold = 0.25;
 
-		const auto imsize = 100.0;
-		const auto marker_threshold = 0.25;
+			cv::Mat vResizedImage(imsize, imsize, aNotYetFoundMarker.mMarkerImage.type());
+			cv::resize(aNotYetFoundMarker.mMarkerImage, vResizedImage, vResizedImage.size(), 0, 0, cv::INTER_LINEAR);
 
-		cv::Mat vResizedImage(imsize, imsize, aNotYetFoundMarker.mMarkerImage.type());
-		cv::resize(aNotYetFoundMarker.mMarkerImage, vResizedImage, vResizedImage.size(), 0, 0, cv::INTER_LINEAR);
+			cv::Mat smallImage(32, 32, aNotYetFoundMarker.mMarkerImage.type());
+			cv::resize(aNotYetFoundMarker.mMarkerImage, smallImage, smallImage.size(), 0, 0, cv::INTER_LINEAR);
 
-		cv::Mat smallImage(32, 32, aNotYetFoundMarker.mMarkerImage.type());
-		cv::resize(aNotYetFoundMarker.mMarkerImage, smallImage, smallImage.size(), 0, 0, cv::INTER_LINEAR);
+			cv::Mat img2;
+			smallImage.convertTo(img2, CV_32FC1);
 
-		std::stringstream file;
-		file << "../beta/img_" << vtr2++ << ".png";
-		cv::imwrite(file.str(), smallImage);
+			float matData[32 * 32];
 
-		cv::Mat vBW = vResizedImage > 170;
+			for (int y = 0; y < 32; y++) {
+				for (int x = 0; x < 32; x++) {
+					matData[y * 32 + x] = img2.at<float>(y, x);
+				}
+			}
 
-		cv::Mat canny;
+			const int64_t dims[4] = { 1, 32, 32 , 1 };
+			const size_t nbytes = 32 * 32 * sizeof(float);
+			TF_Tensor* t = TF_AllocateTensor(TF_FLOAT, dims, 4, nbytes);
+			memcpy(TF_TensorData(t), matData, nbytes);
+			model_t model = getModel();
+			TF_Output inputs[1] = { model.input };
+			TF_Tensor* input_values[1] = { t };
+			TF_Output outputs[1] = { model.output };
+			TF_Tensor* output_values[1] = { NULL };
 
-		cv::Canny(vBW, canny, 0, 255);
-		std::vector<std::vector<cv::Point>> contours;
-		cv::findContours(canny, contours, cv::RETR_LIST, cv::CHAIN_APPROX_NONE);
-		std::vector<std::vector<cv::Point>> contours_poly(contours.size());
-		std::vector<cv::Rect> rawBlobs(contours.size());
+			TF_SessionRun(model.session, //Session
+				NULL, //Run options
+				inputs /*input tensor*/, input_values /*input values*/, 1 /*ninputs*/,
+				outputs /*output tensor*/, output_values /*output values*/, 1 /*noutputs*/,
+				/* No target operations to run */
+				NULL /*target operations*/, 0 /*number of targets*/, NULL /*run metadata*/, model.status /*output status*/);
+			TF_DeleteTensor(t);
+			if (!Okay(model.status)) return false;
+			float* predictions = (float*)malloc(sizeof(float) * 16);
+			memcpy(predictions, TF_TensorData(output_values[0]), sizeof(float) * 16);
+			TF_DeleteTensor(output_values[0]);
 
-		for (size_t i = 0; i < contours.size(); i++) {
-			rawBlobs[i] = boundingRect(contours[i]);
+			char* ids[] = { "7", "8", "9", "10" };
+			char* dirs[] = { "up  ", "down", "left", "right" };
+			float rots[] = { 270.0, 90.0, 180.0, 0.0 };
+			bool found = false;
+			float rot = aNotYetFoundMarker.mMarkerDirection;
+			std::cout << std::endl << std::endl << "Rot: " << rot << std::endl;
+			for (int i = 0; i < 16; ++i) {
+				printf("%s %s  %f  - ", ids[i / 4], dirs[i % 4], predictions[i]);
+				if (predictions[i] > 0.95 && aNotYetFoundMarker.mMarkerConfidence < predictions[i]) {
+					found = true;
+					aNotYetFoundMarker.mMarkerDirection = (int)((rot + rots[i % 4]) + 360) % 360;
+					aNotYetFoundMarker.mMarkerId = (i / 4) + 7;
+					aNotYetFoundMarker.mMarkerConfidence = predictions[i];
+				}
+			}
+			free(predictions);
+			std::cout << std::endl;
+			return found;
+		}
+		catch (const std::exception& e) {
+			std::cout <<"ERRÖHR" << e.what() << std::endl;
 		}
 
-		if (rawBlobs.size() < 1) return false;
-
-		cv::Rect upper_left = rawBlobs[0],
-			lower_left = rawBlobs[0],
-			upper_right = rawBlobs[0],
-			lower_right = rawBlobs[0];
-
-
-		auto euclidean = [](double edge_x, double edge_y, cv::Rect point) {return std::pow((edge_x - point.x), 2.0) + std::pow((edge_y - point.y), 2); };
-
-		for (auto r : rawBlobs) {
-			if (euclidean(0, 0, r) <= euclidean(0, 0, upper_left)) {
-				upper_left = r;
-			}
-			if (euclidean(imsize, 0, r) <= euclidean(imsize, 0, upper_right)) {
-				upper_right = r;
-			}
-			if (euclidean(0, imsize, r) <= euclidean(0, imsize, lower_left)) {
-				lower_left = r;
-			}
-			if (euclidean(imsize, imsize, r) <= euclidean(imsize, imsize, lower_right)) {
-				lower_right = r;
-			}
-
-		}
-
-		cv::Rect imbounds(upper_left.x + upper_left.width, upper_left.y + upper_left.height, upper_right.x - (upper_left.x + upper_left.width), lower_left.y - (upper_left.y + upper_left.height));
-
-		cv::Mat vMarker = vBW(imbounds);
-
-		int width = vMarker.size().width / 3,
-			height = vMarker.size().height / 3;
-
-		for (int i = 0; i < 3; i++) {
-			for (int j = 0; j < 3; j++) {
-				cv::Mat vPart = vMarker(cv::Rect(j * width, i * height, width, height));
-				aNotYetFoundMarker.mMarker.push_back(cv::countNonZero(vPart) > (width * height * marker_threshold));
-			}
-		}
-
-		int vRotations = 0;
-		for (mrvision::Marker vTest : MARKERLIST.getMarker()) {
-			if (vTest.compareTo(aNotYetFoundMarker.mMarker, vRotations)) {
-				aNotYetFoundMarker.mMarkerDirection += 270 - vRotations * 90;
-				aNotYetFoundMarker.mMarkerId = vTest.getId();
-
-				return true;
-			}
-		}
-
+	
 		return false;
 	}
 
 
 	int main(int argc, char** argv)
 	{
-		char ___buff[FILENAME_MAX];
-		_getcwd(___buff, FILENAME_MAX);
-		std::string cwd(___buff);
-		std::cout << "Working directory: " << cwd << std::endl;
-
-		std::cout << "Hello from TensorFlow C library version " << TF_Version() << std::endl;
-		
-		//https://gist.github.com/asimshankar/7c9f8a9b04323e93bb217109da8c7ad2
-
-		model_t model;
-		if (!ModelCreate(&model, "./frozen_model.pb")) {
-			std::cout << "Model loading failed" << std::endl;
-		}
-		else {
-			if (!ModelCheckpoint(&model, "./checkpoint/checkpoint", RESTORE)) {
-				std::cout << "Checkpoint loading failed" << std::endl;
-			}
-			else {
-				if (!ModelInit(&model)) {
-					std::cout << "Model initialization failed" << std::endl;
-				}
-				else {
-					std::cout << "Model loaded correctly" << std::endl;
-				}
-			}
-		}
-
-		/*
 		int vCounter = 0;
 		do {
 			try {
@@ -475,7 +441,7 @@
 				detectingMarkerInImage(image);
 
 
-				cv::waitKey(1);
+				cv::waitKey(30);
 
 			}
 			catch (...) {
@@ -493,7 +459,6 @@
 		}
 
 		std::cout << "Total: fake: " << std::accumulate(std::begin(foundMarkerIds), std::end(foundMarkerIds), 0) << ", real: " << std::accumulate(std::begin(realFoundMarkerIds), std::end(realFoundMarkerIds), 0) << std::endl;
-		*/
-		while (1);
+		
 		return 0;
 	}

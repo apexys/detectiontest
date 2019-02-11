@@ -30,20 +30,10 @@ int ModelCreate(model_t* model, const char* graph_def_filename) {
 	}
 
 	// Handles to the interesting operations in the graph.
-	model->input.oper = TF_GraphOperationByName(g, "input");
+	model->input.oper = TF_GraphOperationByName(g, "input/X");
 	model->input.index = 0;
-	model->target.oper = TF_GraphOperationByName(g, "target");
-	model->target.index = 0;
-	model->output.oper = TF_GraphOperationByName(g, "output");
+	model->output.oper = TF_GraphOperationByName(g, "FullyConnected_1/Softmax");
 	model->output.index = 0;
-
-	model->init_op = TF_GraphOperationByName(g, "init");
-	model->train_op = TF_GraphOperationByName(g, "train");
-	model->save_op = TF_GraphOperationByName(g, "save/control_dependency");
-	model->restore_op = TF_GraphOperationByName(g, "save/restore_all");
-
-	model->checkpoint_file.oper = TF_GraphOperationByName(g, "save/Const");
-	model->checkpoint_file.index = 0;
 	return 1;
 }
 
@@ -65,6 +55,7 @@ int ModelInit(model_t* model) {
 		init_op, 1,
 		/* No metadata */
 		NULL, model->status);
+	std::cout << "Op succeeded" << std::endl;
 	return Okay(model->status);
 }
 
@@ -89,7 +80,7 @@ int ModelCheckpoint(model_t* model, const char* checkpoint_prefix, int type) {
 
 int ModelPredict(model_t* model, float* batch, int batch_size) {
 	// batch consists of 1x1 matrices.
-	const int64_t dims[3] = { batch_size, 1, 1 };
+	const int64_t dims[3] = { batch_size, 32, 32 };
 	const size_t nbytes = batch_size * sizeof(float);
 	TF_Tensor* t = TF_AllocateTensor(TF_FLOAT, dims, 3, nbytes);
 	memcpy(TF_TensorData(t), batch, nbytes);
@@ -99,10 +90,12 @@ int ModelPredict(model_t* model, float* batch, int batch_size) {
 	TF_Output outputs[1] = { model->output };
 	TF_Tensor* output_values[1] = { NULL };
 
-	TF_SessionRun(model->session, NULL, inputs, input_values, 1, outputs,
-		output_values, 1,
+	TF_SessionRun(model->session, //Session
+		NULL, //Run options
+		inputs /*input tensor*/, input_values /*input values*/, 32*32 /*ninputs*/, 
+		outputs /*output tensor*/, output_values /*output values*/, 16 /*noutputs*/,
 		/* No target operations to run */
-		NULL, 0, NULL, model->status);
+		NULL /*target operations*/, 0 /*number of targets*/, NULL /*run metadata*/, model->status /*output status*/);
 	TF_DeleteTensor(t);
 	if (!Okay(model->status)) return 0;
 
